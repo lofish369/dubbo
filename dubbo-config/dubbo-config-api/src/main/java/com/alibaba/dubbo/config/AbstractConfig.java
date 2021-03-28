@@ -89,6 +89,12 @@ public abstract class AbstractConfig implements Serializable {
         return value;
     }
 
+    /**
+     * 读取环境变量和 properties 配置到配置对象
+     * 参见：<a href="https://dubbo.gitbooks.io/dubbo-user-book/configuration/properties.html">属性配置</a>
+     * config 配置对象
+     * @param config
+     */
     protected static void appendProperties(AbstractConfig config) {
         if (config == null) {
             return;
@@ -180,16 +186,23 @@ public abstract class AbstractConfig implements Serializable {
         Method[] methods = config.getClass().getMethods();
         for (Method method : methods) {
             try {
+                 /* 1、方法为获取基本类型，public 的 getting 方法
+                     2、方法名称不能为getClass
+                     3、方法为public
+                     4、返回值为基本类型*/
                 String name = method.getName();
                 if ((name.startsWith("get") || name.startsWith("is"))
                         && !"getClass".equals(name)
                         && Modifier.isPublic(method.getModifiers())
                         && method.getParameterTypes().length == 0
                         && isPrimitive(method.getReturnType())) {
+                    //获取配置上的Parameter注解，如：@Parameter(key = "application.version")
                     Parameter parameter = method.getAnnotation(Parameter.class);
+                    //忽略：
                     if (method.getReturnType() == Object.class || parameter != null && parameter.excluded()) {
                         continue;
                     }
+                    //获得属性名
                     int i = name.startsWith("get") ? 3 : 2;
                     String prop = StringUtils.camelToSplitName(name.substring(i, i + 1).toLowerCase() + name.substring(i + 1), ".");
                     String key;
@@ -198,17 +211,23 @@ public abstract class AbstractConfig implements Serializable {
                     } else {
                         key = prop;
                     }
+                    //获取属性值
                     Object value = method.invoke(config);
                     String str = String.valueOf(value).trim();
                     if (value != null && str.length() > 0) {
+                        //是否进行URL编码(转义)
                         if (parameter != null && parameter.escaped()) {
                             str = URL.encode(str);
                         }
+                        //拼接，详细说明参见 `Parameter#append()` 方法的说明
                         if (parameter != null && parameter.append()) {
+                            // default. 里获取，适用于 ServiceConfig =》ProviderConfig 、ReferenceConfig =》ConsumerConfig
                             String pre = parameters.get(Constants.DEFAULT_KEY + "." + key);
                             if (pre != null && pre.length() > 0) {
                                 str = pre + "," + str;
                             }
+                            //通过 `parameters` 属性配置，例如 `AbstractMethodConfig.parameters`
+                            //优先级： 自定义 > 默认default.
                             pre = parameters.get(key);
                             if (pre != null && pre.length() > 0) {
                                 str = pre + "," + str;
@@ -219,12 +238,14 @@ public abstract class AbstractConfig implements Serializable {
                         }
                         parameters.put(key, str);
                     } else if (parameter != null && parameter.required()) {
+                        //如果Parameter标识为:@Parameter(key = "XXX",required = true)，值不允许为空
                         throw new IllegalStateException(config.getClass().getSimpleName() + "." + key + " == null");
                     }
                 } else if ("getParameters".equals(name)
                         && Modifier.isPublic(method.getModifiers())
                         && method.getParameterTypes().length == 0
                         && method.getReturnType() == Map.class) {
+                    // `#getParameters()` 方法
                     Map<String, String> map = (Map<String, String>) method.invoke(config, new Object[0]);
                     if (map != null && map.size() > 0) {
                         String pre = (prefix != null && prefix.length() > 0 ? prefix + "." : "");
@@ -243,6 +264,12 @@ public abstract class AbstractConfig implements Serializable {
         appendAttributes(parameters, config, null);
     }
 
+    /**
+     * 将 @Parameter(attribute = true) 配置对象的属性，添加到参数集合
+     * 如：MethodConfig.getOnreturnMethod()
+     * Parameter(key = Constants.ON_RETURN_METHOD_KEY, excluded = true, attribute = true)
+     *
+     */
     protected static void appendAttributes(Map<Object, Object> parameters, Object config, String prefix) {
         if (config == null) {
             return;
@@ -260,7 +287,7 @@ public abstract class AbstractConfig implements Serializable {
                     if (parameter == null || !parameter.attribute())
                         continue;
                     String key;
-                    parameter.key();
+                    //使用指定的parameter.key，否则使用方法的属性名称
                     if (parameter.key().length() > 0) {
                         key = parameter.key();
                     } else {
